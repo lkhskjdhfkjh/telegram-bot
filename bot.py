@@ -3,13 +3,13 @@ from telegram.ext import ApplicationBuilder, CommandHandler, MessageHandler, fil
 import random
 import asyncio
 
-# 👉 ВСТАВ СЮДИ СВІЙ ТОКЕН
 TOKEN = "8699261089:AAEd4BgScEn3bevDX6G650ZzGq6e7tZSp40"
 
 players = []
 game_active = False
 current_player_index = 0
 player_stats = {}
+lobby_message_id = None
 
 truths = ["Твій найбільший страх?", "Кого ти любиш?", "Твій секрет?"]
 dares = ["Зміни нік на 10 хв", "Напиши 'я дивний'", "Скинь селфі"]
@@ -17,14 +17,18 @@ dares = ["Зміни нік на 10 хв", "Напиши 'я дивний'", "С
 
 # --- START GAME ---
 async def startgame(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    global players, game_active, current_player_index, player_stats
+    global players, game_active, current_player_index, player_stats, lobby_message_id
 
     players = []
     player_stats = {}
     game_active = False
     current_player_index = 0
 
-    await update.message.reply_text("🔥 Реєстрація відкрита! Пишіть /join (1 хв)")
+    msg = await update.message.reply_text(
+        "🔥 Реєстрація відкрита! Пишіть /join (1 хв)\n\nГравці:\n(поки нікого)"
+    )
+
+    lobby_message_id = msg.message_id
 
     await asyncio.sleep(60)
 
@@ -40,12 +44,32 @@ async def startgame(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 # --- JOIN ---
 async def join(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    global lobby_message_id
+
     user = update.message.from_user
 
     if user.id not in players:
         players.append(user.id)
         player_stats[user.id] = {"truth": 0, "dare": 0}
-        await update.message.reply_text(f"✅ {user.first_name} приєднався!")
+
+        # список гравців
+        player_names = []
+        for p in players:
+            player_names.append(f"<a href='tg://user?id={p}'>гравець</a>")
+
+        text = "🔥 Реєстрація відкрита! Пишіть /join (1 хв)\n\nГравці:\n"
+        text += "\n".join(player_names)
+
+        try:
+            await context.bot.edit_message_text(
+                chat_id=update.effective_chat.id,
+                message_id=lobby_message_id,
+                text=text,
+                parse_mode="HTML"
+            )
+        except:
+            pass
+
 
 # --- LEAVE ---
 async def leave(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -60,13 +84,11 @@ async def leave(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
         await update.message.reply_text(f"❌ {user.first_name} вийшов")
 
-        # якщо гравців менше 2 → стоп
         if len(players) < 2:
             game_active = False
             await update.message.reply_text("⛔ Гру зупинено (мало гравців)")
             return
 
-        # якщо вийшов той хто ходив
         if index <= current_player_index:
             current_player_index -= 1
 
