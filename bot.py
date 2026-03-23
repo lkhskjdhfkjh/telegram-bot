@@ -11,8 +11,8 @@ registration_open = False
 current_player_index = 0
 waiting_end_turn = False
 
-# статистика по групам
 global_stats = {}
+
 
 truths = ["Твій страх?", "Кого любиш?", "Твій секрет?"]
 dares = ["Зміни нік", "Напиши крінж", "Скинь селфі"]
@@ -57,33 +57,74 @@ async def startgame(update: Update, context: ContextTypes.DEFAULT_TYPE):
     registration_open = True
     current_player_index = 0
 
+    chat_id = update.effective_chat.id
+
     msg = await update.message.reply_text(
-        "🔥 Реєстрація відкрита (1 хв)\n/join\nМакс 5 гравців"
+        "🔥 РЕЄСТРАЦІЯ В ГРУ ВІДКРИТА\n\n"
+        "⏳ Час: 60 секунд\n"
+        "👥 Максимум: 5 гравців\n\n"
+        "👉 Напиши /join щоб зайти\n\n"
+        "━━━━━━━━━━━━━━━\n"
+        "🎮 ГРАВЦІ:\n"
+        "поки нікого 😢\n"
+        "━━━━━━━━━━━━━━━"
     )
 
-    # 📌 закріпити повідомлення
+    # пробуємо закріпити
     try:
-        await context.bot.pin_chat_message(update.effective_chat.id, msg.message_id)
+        await context.bot.pin_chat_message(chat_id, msg.message_id)
     except:
-        pass
+        print("не можу закріпити")
 
-    # ⏱ чек 1 хв
-    await asyncio.sleep(60)
+    # ⏱ оновлення кожні 10 сек
+    for i in range(6):
+        await asyncio.sleep(10)
+
+        if not registration_open:
+            return
+
+        names = []
+        for p in players:
+            try:
+                member = await context.bot.get_chat_member(chat_id, p)
+                names.append(f"• {member.user.first_name}")
+            except:
+                names.append("• ???")
+
+        player_list = "\n".join(names) if names else "поки нікого 😢"
+
+        text = (
+            "🔥 РЕЄСТРАЦІЯ В ГРУ ВІДКРИТА\n\n"
+            f"⏳ Залишилось: {60 - (i+1)*10} сек\n"
+            "👥 Максимум: 5 гравців\n\n"
+            "👉 Напиши /join щоб зайти\n\n"
+            "━━━━━━━━━━━━━━━\n"
+            "🎮 ГРАВЦІ:\n"
+            f"{player_list}\n"
+            "━━━━━━━━━━━━━━━"
+        )
+
+        try:
+            await context.bot.edit_message_text(
+                chat_id=chat_id,
+                message_id=msg.message_id,
+                text=text
+            )
+        except:
+            pass
 
     registration_open = False
 
     if len(players) < 2:
-        await update.message.reply_text("❌ Недостатньо гравців")
+        await context.bot.send_message(chat_id, "❌ Недостатньо гравців")
         return
 
-    await update.message.reply_text("🎮 Гра почалась!")
+    await context.bot.send_message(chat_id, "🎮 ГРА ПОЧАЛАСЬ!")
     await begin_game(update, context)
 
 
 # --- JOIN ---
 async def join(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    global players
-
     if not registration_open:
         await update.message.reply_text("❌ Реєстрація закрита")
         return
