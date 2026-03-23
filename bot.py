@@ -2,8 +2,9 @@ from telegram import Update, ReplyKeyboardMarkup
 from telegram.ext import ApplicationBuilder, CommandHandler, MessageHandler, filters, ContextTypes
 import random
 import asyncio
+import os
 
-TOKEN = "8699261089:AAEd4BgScEn3bevDX6G650ZzGq6e7tZSp40"
+TOKEN = os.getenv("8699261089:AAEd4BgScEn3bevDX6G650ZzGq6e7tZSp40")  # для Railway
 
 players = []
 game_active = False
@@ -13,6 +14,11 @@ lobby_message_id = None
 
 truths = ["Твій найбільший страх?", "Кого ти любиш?", "Твій секрет?"]
 dares = ["Зміни нік на 10 хв", "Напиши 'я дивний'", "Скинь селфі"]
+
+
+# --- START ---
+async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    await update.message.reply_text("Я працюю 😎 Напиши /startgame щоб почати гру")
 
 
 # --- START GAME ---
@@ -52,10 +58,12 @@ async def join(update: Update, context: ContextTypes.DEFAULT_TYPE):
         players.append(user.id)
         player_stats[user.id] = {"truth": 0, "dare": 0}
 
-        # список гравців
+        # красиві імена
         player_names = []
         for p in players:
-            player_names.append(f"<a href='tg://user?id={p}'>гравець</a>")
+            member = await context.bot.get_chat_member(update.effective_chat.id, p)
+            name = member.user.first_name
+            player_names.append(f"• {name}")
 
         text = "🔥 Реєстрація відкрита! Пишіть /join (1 хв)\n\nГравці:\n"
         text += "\n".join(player_names)
@@ -64,8 +72,7 @@ async def join(update: Update, context: ContextTypes.DEFAULT_TYPE):
             await context.bot.edit_message_text(
                 chat_id=update.effective_chat.id,
                 message_id=lobby_message_id,
-                text=text,
-                parse_mode="HTML"
+                text=text
             )
         except:
             pass
@@ -97,14 +104,7 @@ async def leave(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def next_turn(update: Update, context: ContextTypes.DEFAULT_TYPE):
     global current_player_index
 
-    if not game_active:
-        return
-
-    if not players:
-        await context.bot.send_message(
-            chat_id=update.effective_chat.id,
-            text="❌ Немає гравців"
-        )
+    if not game_active or not players:
         return
 
     if current_player_index >= len(players):
@@ -112,13 +112,15 @@ async def next_turn(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     player_id = players[current_player_index]
 
+    member = await context.bot.get_chat_member(update.effective_chat.id, player_id)
+    name = member.user.first_name
+
     keyboard = [["правда", "дія"]]
     reply_markup = ReplyKeyboardMarkup(keyboard, resize_keyboard=True)
 
     await context.bot.send_message(
         chat_id=update.effective_chat.id,
-        text=f"<a href='tg://user?id={player_id}'>🎯 Твій хід!</a>\nОбери: правда або дія",
-        parse_mode="HTML",
+        text=f"🎯 {name}, твій хід!\nОбери: правда або дія",
         reply_markup=reply_markup
     )
 
@@ -127,24 +129,16 @@ async def next_turn(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def choice(update: Update, context: ContextTypes.DEFAULT_TYPE):
     global current_player_index
 
-    if not update.message:
-        return
-
-    if not game_active:
+    if not update.message or not game_active:
         return
 
     user = update.message.from_user
     text = update.message.text.lower()
 
-    if not players:
-        return
-
     if user.id != players[current_player_index]:
         return
 
-    stats = player_stats.get(user.id)
-    if not stats:
-        return
+    stats = player_stats[user.id]
 
     if text == "правда":
         if stats["truth"] >= 3:
@@ -153,7 +147,6 @@ async def choice(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
         stats["truth"] += 1
         stats["dare"] = 0
-
         await update.message.reply_text(random.choice(truths))
 
     elif text == "дія":
@@ -163,7 +156,6 @@ async def choice(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
         stats["dare"] += 1
         stats["truth"] = 0
-
         await update.message.reply_text(random.choice(dares))
 
     else:
@@ -173,11 +165,15 @@ async def choice(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await next_turn(update, context)
 
 
+# --- APP ---
 app = ApplicationBuilder().token(TOKEN).build()
 
+app.add_handler(CommandHandler("start", start))
 app.add_handler(CommandHandler("startgame", startgame))
 app.add_handler(CommandHandler("join", join))
 app.add_handler(CommandHandler("leave", leave))
 app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, choice))
+
+print("БОТ ЗАПУЩЕНИЙ 🔥")
 
 app.run_polling()
