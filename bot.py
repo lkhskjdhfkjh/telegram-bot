@@ -1,10 +1,9 @@
 from telegram import Update, ReplyKeyboardMarkup
 from telegram.ext import ApplicationBuilder, CommandHandler, MessageHandler, filters, ContextTypes
 import random
-import asyncio
 import os
 
-TOKEN = ("8699261089:AAEd4BgScEn3bevDX6G650ZzGq6e7tZSp40")  # для Railway
+TOKEN = os.getenv("8699261089:AAEd4BgScEn3bevDX6G650ZzGq6e7tZSp40")
 
 players = []
 game_active = False
@@ -12,13 +11,22 @@ current_player_index = 0
 player_stats = {}
 lobby_message_id = None
 
-truths = ["Твій найбільший страх?", "Кого ти любиш?", "Твій секрет?"]
-dares = ["Зміни нік на 10 хв", "Напиши 'я дивний'", "Скинь селфі"]
+truths = [
+    "Твій найбільший страх?",
+    "Кого ти любиш?",
+    "Твій секрет?"
+]
+
+dares = [
+    "Зміни нік на 10 хв",
+    "Напиши 'я дивний'",
+    "Скинь селфі"
+]
 
 
 # --- START ---
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await update.message.reply_text("Я працюю 😎 Напиши /startgame щоб почати гру")
+    await update.message.reply_text("Я працюю 😎 /startgame щоб почати")
 
 
 # --- START GAME ---
@@ -36,16 +44,24 @@ async def startgame(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     lobby_message_id = msg.message_id
 
-    await asyncio.sleep(60)
+    # ЗАПУСК ЧЕРЕЗ JOB (НЕ CRASH)
+    context.job_queue.run_once(start_real_game, 60, chat_id=update.effective_chat.id)
+
+
+# --- START REAL GAME ---
+async def start_real_game(context: ContextTypes.DEFAULT_TYPE):
+    global game_active
+
+    chat_id = context.job.chat_id
 
     if len(players) < 2:
-        await update.message.reply_text("❌ Недостатньо гравців")
+        await context.bot.send_message(chat_id, "❌ Недостатньо гравців")
         return
 
     game_active = True
-    await update.message.reply_text("🎮 Гра почалась!")
+    await context.bot.send_message(chat_id, "🎮 Гра почалась!")
 
-    await next_turn(update, context)
+    await next_turn(context)
 
 
 # --- JOIN ---
@@ -58,15 +74,14 @@ async def join(update: Update, context: ContextTypes.DEFAULT_TYPE):
         players.append(user.id)
         player_stats[user.id] = {"truth": 0, "dare": 0}
 
-        # красиві імена
-        player_names = []
+        # список гравців
+        names = []
         for p in players:
             member = await context.bot.get_chat_member(update.effective_chat.id, p)
-            name = member.user.first_name
-            player_names.append(f"• {name}")
+            names.append(f"• {member.user.first_name}")
 
         text = "🔥 Реєстрація відкрита! Пишіть /join (1 хв)\n\nГравці:\n"
-        text += "\n".join(player_names)
+        text += "\n".join(names)
 
         try:
             await context.bot.edit_message_text(
@@ -93,7 +108,7 @@ async def leave(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
         if len(players) < 2:
             game_active = False
-            await update.message.reply_text("⛔ Гру зупинено (мало гравців)")
+            await update.message.reply_text("⛔ Гру зупинено")
             return
 
         if index <= current_player_index:
@@ -101,7 +116,7 @@ async def leave(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 
 # --- NEXT TURN ---
-async def next_turn(update: Update, context: ContextTypes.DEFAULT_TYPE):
+async def next_turn(context):
     global current_player_index
 
     if not game_active or not players:
@@ -112,15 +127,15 @@ async def next_turn(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     player_id = players[current_player_index]
 
-    member = await context.bot.get_chat_member(update.effective_chat.id, player_id)
+    member = await context.bot.get_chat_member(context.job.chat_id, player_id)
     name = member.user.first_name
 
     keyboard = [["правда", "дія"]]
     reply_markup = ReplyKeyboardMarkup(keyboard, resize_keyboard=True)
 
     await context.bot.send_message(
-        chat_id=update.effective_chat.id,
-        text=f"🎯 {name}, твій хід!\nОбери: правда або дія",
+        chat_id=context.job.chat_id,
+        text=f"🎯 {name}, твій хід!\nОбери:",
         reply_markup=reply_markup
     )
 
@@ -142,7 +157,7 @@ async def choice(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     if text == "правда":
         if stats["truth"] >= 3:
-            await update.message.reply_text("❌ Забагато правди! Обери дію 😈")
+            await update.message.reply_text("❌ Забагато правди!")
             return
 
         stats["truth"] += 1
@@ -151,7 +166,7 @@ async def choice(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     elif text == "дія":
         if stats["dare"] >= 3:
-            await update.message.reply_text("❌ Забагато дій! Обери правду 😈")
+            await update.message.reply_text("❌ Забагато дій!")
             return
 
         stats["dare"] += 1
@@ -162,7 +177,9 @@ async def choice(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
 
     current_player_index += 1
-    await next_turn(update, context)
+
+    # наступний хід
+    context.job_queue.run_once(next_turn, 0, chat_id=update.effective_chat.id)
 
 
 # --- APP ---
