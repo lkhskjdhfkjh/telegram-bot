@@ -1,10 +1,10 @@
 from telegram import Update, ReplyKeyboardMarkup
 from telegram.ext import ApplicationBuilder, CommandHandler, MessageHandler, filters, ContextTypes
 import random
-import os
 import asyncio
 
-TOKEN = os.getenv("8699261089:AAEd4BgScEn3bevDX6G650ZzGq6e7tZSp40")
+# 👉 ВСТАВ СЮДИ СВІЙ ТОКЕН
+TOKEN = "8699261089:AAEd4BgScEn3bevDX6G650ZzGq6e7tZSp40"
 
 players = []
 game_active = False
@@ -17,22 +17,23 @@ dares = ["Зміни нік на 10 хв", "Напиши 'я дивний'", "С
 
 # --- START GAME ---
 async def startgame(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    global players, game_active, current_player_index
+    global players, game_active, current_player_index, player_stats
 
     players = []
+    player_stats = {}
     game_active = False
     current_player_index = 0
 
-    await update.message.reply_text("Реєстрація відкрита! Пишіть /join (1 хвилина)")
+    await update.message.reply_text("🔥 Реєстрація відкрита! Пишіть /join (1 хв)")
 
     await asyncio.sleep(60)
 
     if len(players) < 2:
-        await update.message.reply_text("Недостатньо гравців 😢")
+        await update.message.reply_text("❌ Недостатньо гравців")
         return
 
     game_active = True
-    await update.message.reply_text("Гра почалась 🔥")
+    await update.message.reply_text("🎮 Гра почалась!")
 
     await next_turn(update, context)
 
@@ -44,16 +45,30 @@ async def join(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if user.id not in players:
         players.append(user.id)
         player_stats[user.id] = {"truth": 0, "dare": 0}
-        await update.message.reply_text(f"{user.first_name} приєднався!")
-
+        await update.message.reply_text(f"✅ {user.first_name} приєднався!")
 
 # --- LEAVE ---
 async def leave(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    global current_player_index, game_active
+
     user = update.message.from_user
 
     if user.id in players:
+        index = players.index(user.id)
         players.remove(user.id)
-        await update.message.reply_text(f"{user.first_name} вийшов з гри")
+        player_stats.pop(user.id, None)
+
+        await update.message.reply_text(f"❌ {user.first_name} вийшов")
+
+        # якщо гравців менше 2 → стоп
+        if len(players) < 2:
+            game_active = False
+            await update.message.reply_text("⛔ Гру зупинено (мало гравців)")
+            return
+
+        # якщо вийшов той хто ходив
+        if index <= current_player_index:
+            current_player_index -= 1
 
 
 # --- NEXT TURN ---
@@ -61,6 +76,13 @@ async def next_turn(update: Update, context: ContextTypes.DEFAULT_TYPE):
     global current_player_index
 
     if not game_active:
+        return
+
+    if not players:
+        await context.bot.send_message(
+            chat_id=update.effective_chat.id,
+            text="❌ Немає гравців"
+        )
         return
 
     if current_player_index >= len(players):
@@ -73,7 +95,7 @@ async def next_turn(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     await context.bot.send_message(
         chat_id=update.effective_chat.id,
-        text=f"<a href='tg://user?id={player_id}'>Твій хід!</a>\nОбери: правда або дія",
+        text=f"<a href='tg://user?id={player_id}'>🎯 Твій хід!</a>\nОбери: правда або дія",
         parse_mode="HTML",
         reply_markup=reply_markup
     )
@@ -92,10 +114,15 @@ async def choice(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user = update.message.from_user
     text = update.message.text.lower()
 
+    if not players:
+        return
+
     if user.id != players[current_player_index]:
         return
 
-    stats = player_stats[user.id]
+    stats = player_stats.get(user.id)
+    if not stats:
+        return
 
     if text == "правда":
         if stats["truth"] >= 3:
