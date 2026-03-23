@@ -10,17 +10,23 @@ game_active = False
 registration_open = False
 current_player_index = 0
 waiting_end_turn = False
+turn_task = None
 
 truths = [
     "Який твій найбільший страх?",
-    "Кого ти любиш?",
-    "Твій секрет?"
+    "Кого ти любиш найбільше (окрім родичів)?",
+    "Який твій найбільший секрет?"
+    "На що готовий заради коханої людини?"
+    "Чи уникав ти колись зустрічі з кимось?"
 ]
 
 dares = [
-    "Зміни нік на 10 хв",
-    "Напиши 'я дивний'",
-    "Скинь селфі"
+    "Зміни нік на 10 хвилин",
+    "Зміни аватарку на 10 хвилин",
+    "Скинь 13 фото з галереї"
+    "Заспівай якусь пісню в голосове повідомлення"
+    "Напиши четвертому по списку в чатах 'Я тебе люблю'"
+    "
 ]
 
 # --- START GAME ---
@@ -37,13 +43,17 @@ async def startgame(update: Update, context: ContextTypes.DEFAULT_TYPE):
     current_player_index = 0
 
     msg = await update.message.reply_text(
-        "🔥 Реєстрація відкрита!\nПиши /join\n⏳ 60 секунд"
+        "🔥 Реєстрація відкрита!\n\n"
+        "Пиши /join щоб приєднатись\n"
+        "⏳ Залишилося 60 секунд до початку гри"
     )
 
-    context.application.create_task(registration_timer(context, update.effective_chat.id, msg.message_id))
+    context.application.create_task(
+        registration_timer(context, update.effective_chat.id, msg.message_id)
+    )
 
 
-# --- TIMER ---
+# --- TIMER REGISTRATION ---
 async def registration_timer(context, chat_id, message_id):
     global registration_open, game_active
 
@@ -57,7 +67,9 @@ async def registration_timer(context, chat_id, message_id):
             await context.bot.edit_message_text(
                 chat_id=chat_id,
                 message_id=message_id,
-                text=f"🔥 Реєстрація відкрита!\nПиши /join\n⏳ {60 - (i+1)*10} сек"
+                text=f"🔥 Реєстрація відкрита!\n\n"
+                     f"Пиши /join щоб приєднатись\n"
+                     f"⏳ Залишилося {60 - (i+1)*10} секунд до початку гри"
             )
         except:
             pass
@@ -108,7 +120,7 @@ async def leave(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 # --- NEXT TURN ---
 async def next_turn(context, chat_id):
-    global current_player_index, waiting_end_turn
+    global current_player_index, waiting_end_turn, turn_task
 
     if not game_active or not players:
         return
@@ -116,7 +128,9 @@ async def next_turn(context, chat_id):
     if current_player_index >= len(players):
         current_player_index = 0
 
-    player_id = players[current_player_index]
+    user = await context.bot.get_chat(players[current_player_index])
+    name = user.first_name
+    player_id = user.id
 
     keyboard = [["правда", "дія"]]
     reply_markup = ReplyKeyboardMarkup(keyboard, resize_keyboard=True)
@@ -125,15 +139,44 @@ async def next_turn(context, chat_id):
 
     await context.bot.send_message(
         chat_id=chat_id,
-        text=f"<a href='tg://user?id={player_id}'>🎯 Твій хід!</a>\nОбери: правда або дія",
-        parse_mode="HTML",
+        text=f"🎯 {name}, твій хід!\n\nОбери: правда або дія",
         reply_markup=reply_markup
     )
+
+    # таймер ходу
+    if turn_task:
+        turn_task.cancel()
+
+    turn_task = context.application.create_task(
+        turn_timer(context, chat_id, player_id)
+    )
+
+
+# --- TURN TIMER ---
+async def turn_timer(context, chat_id, player_id):
+    global current_player_index
+
+    await asyncio.sleep(180)
+
+    if not game_active:
+        return
+
+    if players[current_player_index] != player_id:
+        return
+
+    current_player_index += 1
+
+    await context.bot.send_message(
+        chat_id,
+        "⏱ Час вийшов! Хід передано іншому гравцю"
+    )
+
+    await next_turn(context, chat_id)
 
 
 # --- CHOICE ---
 async def choice(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    global current_player_index, waiting_end_turn
+    global current_player_index, waiting_end_turn, turn_task
 
     if not update.message or not game_active:
         return
@@ -141,15 +184,26 @@ async def choice(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user = update.message.from_user
     text = update.message.text.lower()
 
+    # ❗ якщо не його хід — прибираємо кнопки
     if user.id != players[current_player_index]:
+        await update.message.reply_text(
+            "⛔ Зараз не твій хід",
+            reply_markup=ReplyKeyboardRemove()
+        )
         return
 
     if not waiting_end_turn:
         if text == "правда":
-            await update.message.reply_text(random.choice(truths))
+            await update.message.reply_text(
+                random.choice(truths),
+                reply_markup=ReplyKeyboardRemove()
+            )
 
         elif text == "дія":
-            await update.message.reply_text(random.choice(dares))
+            await update.message.reply_text(
+                random.choice(dares),
+                reply_markup=ReplyKeyboardRemove()
+            )
 
         else:
             return
@@ -160,11 +214,14 @@ async def choice(update: Update, context: ContextTypes.DEFAULT_TYPE):
         waiting_end_turn = True
 
         await update.message.reply_text(
-            "👉 Натисни 'завершити хід'",
+            "✅ Виконай завдання і натисни «завершити хід»",
             reply_markup=reply_markup
         )
 
     elif waiting_end_turn and text == "завершити хід":
+        if turn_task:
+            turn_task.cancel()
+
         current_player_index += 1
         waiting_end_turn = False
 
