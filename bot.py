@@ -1,14 +1,27 @@
-from telegram import Update
-from telegram.ext import ApplicationBuilder, MessageHandler, filters, ContextTypes
+from telegram import Update, ReplyKeyboardMarkup
+from telegram.ext import ApplicationBuilder, CommandHandler, MessageHandler, filters, ContextTypes
 
-TOKEN = "8699261089:AAEd4BgScEn3bevDX6G650ZzGq6e7tZSp40"
+import os
+TOKEN = os.getenv("TOKEN")
 
-async def reply(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if update.message.text == "/start":
-        await update.message.reply_text("Пока")
+
+async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    keyboard = [["Гугу гага"]]
+    reply_markup = ReplyKeyboardMarkup(keyboard, resize_keyboard=True)
+
+    await update.message.reply_text("пока", reply_markup=reply_markup)
+
+
+async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    text = update.message.text
+
+    if text == "Гугу гага":
+        await update.message.reply_text("67")
+
 
 app = ApplicationBuilder().token(TOKEN).build()
 
-app.add_handler(MessageHandler(filters.TEXT, reply))
+app.add_handler(CommandHandler("start", start))
+app.add_handler(MessageHandler(filters.TEXT, handle_message))
 
 app.run_polling()
