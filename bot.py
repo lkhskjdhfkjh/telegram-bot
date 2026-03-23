@@ -1,27 +1,87 @@
-from telegram import Update, ReplyKeyboardMarkup
-from telegram.ext import ApplicationBuilder, CommandHandler, MessageHandler, filters, ContextTypes
-
+from telegram import Update
+from telegram.ext import ApplicationBuilder, MessageHandler, filters, ContextTypes
+import random
 import os
-TOKEN = os.getenv("TOKEN")
+
+TOKEN = os.getenv("8699261089:AAEd4BgScEn3bevDX6G650ZzGq6e7tZSp40")
+
+# ПРАВДА
+truths = [
+    "Кого з цього чату ти вважаєш найкрасивішим?",
+    "Кого ти не любиш тут?",
+    "З ким би пішов(ла) на побачення?",
+    "Твій найкринжовіший момент?",
+    "Ти коли-небудь закохувався(лась) в друга?",
+    "Кому з чату ти заздриш?",
+    "Твоя найбільша брехня?",
+    "Кого б поцілував(ла) тут?",
+    "Твоя найбільша слабкість?",
+    "Що ти робиш, коли ніхто не бачить?",
+    "Найдивніша думка сьогодні?",
+    "Твій секрет, який ніхто не знає?",
+    "Кого б видалив(ла) з чату?",
+    "Кого б обрав(ла): любов чи гроші?",
+    "Ти колись сталкерив когось?",
+    "Що тебе найбільше бісить у людях?",
+    "Ти коли-небудь плакав(ла) через людину?",
+    "Кому з чату довіряєш найбільше?",
+    "Кого боїшся втратити?",
+    "Що б ти зробив(ла), якби ніхто не дізнався?",
+    "Твій найбільший страх?",
+    "Кого вважаєш найтоксичнішим?",
+    "Що приховуєш від усіх?",
+    "Ти коли-небудь когось зраджував(ла)?",
+    "Кого б взяв(ла) з собою на острів?"
+]
+
+# ДІЯ
+dares = [
+    "Зміни нік на 10 хв",
+    "Зміни аватарку на смішну на 10 хв 😂",
+    "Напиши будь-кому з чату 'я тебе люблю' ❤️",
+    "Зроби комплімент рандомній людині",
+    "Напиши в чат 'я сьогодні дивний' 😅",
+    "Скинь голосове повідомлення",
+    "Напиши комусь в лс прямо зараз",
+    "Скинь останнє фото з галереї 😏",
+    "Зроби селфі і скинь у чат",
+    "Напиши щось максимально крінжове",
+    "Напиши 'мені соромно' 😳",
+    "Зізнайся в чомусь дивному",
+    "Напиши правду про себе",
+    "Скажи хто тобі подобається",
+    "Зроби вигляд що ти закоханий(а)",
+    "Напиши щось тупе ВЕЛИКИМИ літерами",
+    "Напиши перше слово що прийде в голову",
+    "Скинь пісню яку слухаєш",
+    "Скажи чесно кого ти недолюблюєш",
+    "Напиши будь-яке ім'я з чату",
+    "Зроби комплімент людині вище",
+    "Скинь будь-який мем",
+    "Напиши 'мені ніяково' 😅",
+    "Напиши рандомну фразу",
+    "Напиши щось дуже дивне"
+]
 
 
-async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    keyboard = [["Гугу гага"]]
-    reply_markup = ReplyKeyboardMarkup(keyboard, resize_keyboard=True)
+async def reply(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    text = update.message.text.lower()
+    user = update.message.from_user
 
-    await update.message.reply_text("пока", reply_markup=reply_markup)
+    # тег користувача
+    mention = f"<a href='tg://user?id={user.id}'>{user.first_name}</a>"
 
+    if text == "!правда":
+        await update.message.reply_html(
+            f"{mention}, тобі правда:\n\n{random.choice(truths)}"
+        )
 
-async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    text = update.message.text
-
-    if text == "Гугу гага":
-        await update.message.reply_text("67")
+    elif text == "!дія":
+        await update.message.reply_html(
+            f"{mention}, тобі дія:\n\n{random.choice(dares)}"
+        )
 
 
 app = ApplicationBuilder().token(TOKEN).build()
-
-app.add_handler(CommandHandler("start", start))
-app.add_handler(MessageHandler(filters.TEXT, handle_message))
-
+app.add_handler(MessageHandler(filters.TEXT, reply))
 app.run_polling()
