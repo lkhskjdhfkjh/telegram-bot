@@ -1,25 +1,42 @@
-from telegram import Update, ReplyKeyboardMarkup
+from telegram import Update, ReplyKeyboardMarkup, ReplyKeyboardRemove
 from telegram.ext import ApplicationBuilder, CommandHandler, MessageHandler, filters, ContextTypes
 import random
+import asyncio
 
 TOKEN = "8699261089:AAHUKDhXNgUVkHNyOpkXHatlTRUZzM53n4U"
 
 players = []
 game_active = False
+registration_open = False
 current_player_index = 0
-player_stats = {}
 waiting_end_turn = False
 
-# 📊 глобальна статистика
+# статистика по групам
 global_stats = {}
 
 truths = ["Твій страх?", "Кого любиш?", "Твій секрет?"]
 dares = ["Зміни нік", "Напиши крінж", "Скинь селфі"]
 
 
-def init_user(user_id):
-    if user_id not in global_stats:
-        global_stats[user_id] = {
+# --- LEVEL ---
+def get_level(total):
+    if total < 10:
+        return "😐 Новачок"
+    elif total < 30:
+        return "😎 Норм"
+    elif total < 60:
+        return "🔥 Про"
+    else:
+        return "👑 Бог"
+
+
+# --- INIT USER ---
+def init_user(chat_id, user_id):
+    if chat_id not in global_stats:
+        global_stats[chat_id] = {}
+
+    if user_id not in global_stats[chat_id]:
+        global_stats[chat_id][user_id] = {
             "games": 0,
             "truth": 0,
             "dare": 0
@@ -33,29 +50,52 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 # --- START GAME ---
 async def startgame(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    global players, game_active, current_player_index, player_stats
+    global players, game_active, registration_open, current_player_index
 
     players = []
-    player_stats = {}
     game_active = False
+    registration_open = True
     current_player_index = 0
 
-    await update.message.reply_text("🔥 /join\n/begin (макс 4)")
+    msg = await update.message.reply_text(
+        "🔥 Реєстрація відкрита (1 хв)\n/join\nМакс 5 гравців"
+    )
+
+    # 📌 закріпити повідомлення
+    try:
+        await context.bot.pin_chat_message(update.effective_chat.id, msg.message_id)
+    except:
+        pass
+
+    # ⏱ чек 1 хв
+    await asyncio.sleep(60)
+
+    registration_open = False
+
+    if len(players) < 2:
+        await update.message.reply_text("❌ Недостатньо гравців")
+        return
+
+    await update.message.reply_text("🎮 Гра почалась!")
+    await begin_game(update, context)
 
 
 # --- JOIN ---
 async def join(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    user = update.message.from_user
+    global players
 
-    if len(players) >= 4:
-        await update.message.reply_text("❌ Макс 4")
+    if not registration_open:
+        await update.message.reply_text("❌ Реєстрація закрита")
         return
+
+    if len(players) >= 5:
+        await update.message.reply_text("❌ Макс 5 гравців")
+        return
+
+    user = update.message.from_user
 
     if user.id not in players:
         players.append(user.id)
-        player_stats[user.id] = {"truth": 0, "dare": 0}
-        init_user(user.id)
-
         await update.message.reply_text(f"{user.first_name} в грі 😎")
 
 
@@ -80,22 +120,16 @@ async def leave(update: Update, context: ContextTypes.DEFAULT_TYPE):
             current_player_index -= 1
 
 
-# --- BEGIN ---
-async def begin(update: Update, context: ContextTypes.DEFAULT_TYPE):
+# --- BEGIN GAME ---
+async def begin_game(update: Update, context: ContextTypes.DEFAULT_TYPE):
     global game_active
 
-    if len(players) < 2:
-        await update.message.reply_text("❌ Мінімум 2")
-        return
-
     game_active = True
+    chat_id = update.effective_chat.id
 
-    # 📊 рахуємо гру
     for p in players:
-        init_user(p)
-        global_stats[p]["games"] += 1
-
-    await update.message.reply_text("🎮 Старт!")
+        init_user(chat_id, p)
+        global_stats[chat_id][p]["games"] += 1
 
     await next_turn(update, context)
 
@@ -108,7 +142,7 @@ async def next_turn(update: Update, context: ContextTypes.DEFAULT_TYPE):
         current_player_index = 0
 
     player_id = players[current_player_index]
-    user = await context.bot.get_chat_member(update.effective_chat.id, player_id)
+    member = await context.bot.get_chat_member(update.effective_chat.id, player_id)
 
     waiting_end_turn = False
 
@@ -116,7 +150,7 @@ async def next_turn(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     await context.bot.send_message(
         chat_id=update.effective_chat.id,
-        text=f"🎯 {user.user.first_name}, твій хід",
+        text=f"🎯 {member.user.first_name}, твій хід",
         reply_markup=ReplyKeyboardMarkup(keyboard, resize_keyboard=True)
     )
 
@@ -130,18 +164,22 @@ async def choice(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     user = update.message.from_user
     text = update.message.text.lower()
+    chat_id = update.effective_chat.id
 
     if user.id != players[current_player_index]:
         return
 
+    init_user(chat_id, user.id)
+
     if waiting_end_turn:
         if text == "завершити хід":
+            await update.message.reply_text("Хід завершено", reply_markup=ReplyKeyboardRemove())
             current_player_index += 1
             await next_turn(update, context)
         return
 
     if text == "правда":
-        global_stats[user.id]["truth"] += 1
+        global_stats[chat_id][user.id]["truth"] += 1
 
         await update.message.reply_text(
             random.choice(truths),
@@ -151,7 +189,7 @@ async def choice(update: Update, context: ContextTypes.DEFAULT_TYPE):
         waiting_end_turn = True
 
     elif text == "дія":
-        global_stats[user.id]["dare"] += 1
+        global_stats[chat_id][user.id]["dare"] += 1
 
         await update.message.reply_text(
             random.choice(dares),
@@ -164,36 +202,41 @@ async def choice(update: Update, context: ContextTypes.DEFAULT_TYPE):
 # --- STATS ---
 async def stats(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user = update.message.from_user
-    init_user(user.id)
+    chat_id = update.effective_chat.id
 
-    s = global_stats[user.id]
+    init_user(chat_id, user.id)
 
+    s = global_stats[chat_id][user.id]
     total = s["truth"] + s["dare"]
+    level = get_level(total)
 
     await update.message.reply_text(
-        f"📊 Твоя статистика:\n"
-        f"🎮 Ігор: {s['games']}\n"
+        f"📊 Ігор: {s['games']}\n"
         f"🗣 Правда: {s['truth']}\n"
         f"😈 Дія: {s['dare']}\n"
-        f"📊 Всього: {total}"
+        f"🏆 Рівень: {level}"
     )
 
 
 # --- TOP ---
 async def top(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if not global_stats:
+    chat_id = update.effective_chat.id
+
+    if chat_id not in global_stats:
         await update.message.reply_text("Немає даних")
         return
 
-    text = "🏆 Рейтинг:\n"
+    text = "🏆 Топ по іграм:\n"
 
-    sorted_users = sorted(global_stats.items(), key=lambda x: x[1]["truth"] + x[1]["dare"], reverse=True)
+    sorted_users = sorted(
+        global_stats[chat_id].items(),
+        key=lambda x: x[1]["games"],
+        reverse=True
+    )
 
     for i, (uid, data) in enumerate(sorted_users[:5]):
-        user = await context.bot.get_chat_member(update.effective_chat.id, uid)
-        total = data["truth"] + data["dare"]
-
-        text += f"{i+1}. {user.user.first_name} — {total}\n"
+        user = await context.bot.get_chat_member(chat_id, uid)
+        text += f"{i+1}. {user.user.first_name} — {data['games']}\n"
 
     await update.message.reply_text(text)
 
@@ -205,9 +248,10 @@ app.add_handler(CommandHandler("start", start))
 app.add_handler(CommandHandler("startgame", startgame))
 app.add_handler(CommandHandler("join", join))
 app.add_handler(CommandHandler("leave", leave))
-app.add_handler(CommandHandler("begin", begin))
 app.add_handler(CommandHandler("stats", stats))
 app.add_handler(CommandHandler("top", top))
 app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, choice))
+
+print("БОТ ПРАЦЮЄ 🔥")
 
 app.run_polling()
