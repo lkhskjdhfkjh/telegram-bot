@@ -3,7 +3,7 @@ from telegram.ext import ApplicationBuilder, MessageHandler, filters, ContextTyp
 import random
 import os
 
-TOKEN = os.getenv("8699261089:AAEd4BgScEn3bevDX6G650ZzGq6e7tZSp40")
+TOKEN = os.getenv("TOKEN")
 
 # ПРАВДА
 truths = [
@@ -65,10 +65,12 @@ dares = [
 
 
 async def reply(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not update.message:
+        return
+
     text = update.message.text.lower()
     user = update.message.from_user
 
-    # тег користувача
     mention = f"<a href='tg://user?id={user.id}'>{user.first_name}</a>"
 
     if text == "!правда":
@@ -83,5 +85,7 @@ async def reply(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 
 app = ApplicationBuilder().token(TOKEN).build()
-app.add_handler(MessageHandler(filters.TEXT, reply))
+
+app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, reply))
+
 app.run_polling()
