@@ -4,7 +4,7 @@ import random
 import asyncio
 import os
 
-TOKEN = os.getenv("8699261089:AAEd4BgScEn3bevDX6G650ZzGq6e7tZSp40")  # для Railway
+TOKEN = ("8699261089:AAEd4BgScEn3bevDX6G650ZzGq6e7tZSp40")  # для Railway
 
 players = []
 game_active = False
