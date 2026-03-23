@@ -2,6 +2,7 @@ from telegram import Update, ReplyKeyboardMarkup, ReplyKeyboardRemove
 from telegram.ext import ApplicationBuilder, CommandHandler, MessageHandler, filters, ContextTypes
 import random
 import asyncio
+import json
 
 TOKEN = "8699261089:AAHUKDhXNgUVkHNyOpkXHatlTRUZzM53n4U"
 
@@ -12,10 +13,26 @@ current_player_index = 0
 waiting_end_turn = False
 
 global_stats = {}
+STATS_FILE = "stats.json"
 
 
 truths = ["Твій страх?", "Кого любиш?", "Твій секрет?"]
 dares = ["Зміни нік", "Напиши крінж", "Скинь селфі"]
+
+
+# --- SAVE / LOAD ---
+def save_stats():
+    with open(STATS_FILE, "w") as f:
+        json.dump(global_stats, f)
+
+
+def load_stats():
+    global global_stats
+    try:
+        with open(STATS_FILE, "r") as f:
+            global_stats = json.load(f)
+    except:
+        global_stats = {}
 
 
 # --- LEVEL ---
@@ -32,6 +49,9 @@ def get_level(total):
 
 # --- INIT USER ---
 def init_user(chat_id, user_id):
+    chat_id = str(chat_id)
+    user_id = str(user_id)
+
     if chat_id not in global_stats:
         global_stats[chat_id] = {}
 
@@ -70,13 +90,11 @@ async def startgame(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "━━━━━━━━━━━━━━━"
     )
 
-    # пробуємо закріпити
     try:
         await context.bot.pin_chat_message(chat_id, msg.message_id)
     except:
-        print("не можу закріпити")
+        pass
 
-    # ⏱ оновлення кожні 10 сек
     for i in range(6):
         await asyncio.sleep(10)
 
@@ -166,11 +184,13 @@ async def begin_game(update: Update, context: ContextTypes.DEFAULT_TYPE):
     global game_active
 
     game_active = True
-    chat_id = update.effective_chat.id
+    chat_id = str(update.effective_chat.id)
 
     for p in players:
         init_user(chat_id, p)
-        global_stats[chat_id][p]["games"] += 1
+        global_stats[chat_id][str(p)]["games"] += 1
+
+    save_stats()
 
     await next_turn(update, context)
 
@@ -205,7 +225,7 @@ async def choice(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     user = update.message.from_user
     text = update.message.text.lower()
-    chat_id = update.effective_chat.id
+    chat_id = str(update.effective_chat.id)
 
     if user.id != players[current_player_index]:
         return
@@ -220,7 +240,8 @@ async def choice(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
 
     if text == "правда":
-        global_stats[chat_id][user.id]["truth"] += 1
+        global_stats[chat_id][str(user.id)]["truth"] += 1
+        save_stats()
 
         await update.message.reply_text(
             random.choice(truths),
@@ -230,7 +251,8 @@ async def choice(update: Update, context: ContextTypes.DEFAULT_TYPE):
         waiting_end_turn = True
 
     elif text == "дія":
-        global_stats[chat_id][user.id]["dare"] += 1
+        global_stats[chat_id][str(user.id)]["dare"] += 1
+        save_stats()
 
         await update.message.reply_text(
             random.choice(dares),
@@ -243,11 +265,11 @@ async def choice(update: Update, context: ContextTypes.DEFAULT_TYPE):
 # --- STATS ---
 async def stats(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user = update.message.from_user
-    chat_id = update.effective_chat.id
+    chat_id = str(update.effective_chat.id)
 
     init_user(chat_id, user.id)
 
-    s = global_stats[chat_id][user.id]
+    s = global_stats[chat_id][str(user.id)]
     total = s["truth"] + s["dare"]
     level = get_level(total)
 
@@ -261,7 +283,7 @@ async def stats(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 # --- TOP ---
 async def top(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    chat_id = update.effective_chat.id
+    chat_id = str(update.effective_chat.id)
 
     if chat_id not in global_stats:
         await update.message.reply_text("Немає даних")
@@ -276,13 +298,15 @@ async def top(update: Update, context: ContextTypes.DEFAULT_TYPE):
     )
 
     for i, (uid, data) in enumerate(sorted_users[:5]):
-        user = await context.bot.get_chat_member(chat_id, uid)
+        user = await context.bot.get_chat_member(update.effective_chat.id, int(uid))
         text += f"{i+1}. {user.user.first_name} — {data['games']}\n"
 
     await update.message.reply_text(text)
 
 
-# --- APP ---
+# --- RUN ---
+load_stats()
+
 app = ApplicationBuilder().token(TOKEN).build()
 
 app.add_handler(CommandHandler("start", start))
