@@ -4,7 +4,7 @@ import random
 import os
 import asyncio
 
-TOKEN = os.getenv("TOKEN")
+TOKEN = os.getenv("8699261089:AAEd4BgScEn3bevDX6G650ZzGq6e7tZSp40")
 
 players = []
 game_active = False
