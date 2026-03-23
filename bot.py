@@ -4,7 +4,7 @@ import random
 import asyncio
 import json
 
-TOKEN = "8699261089:AAHUKDhXNgUVkHNyOpkXHatlTRUZzM53n4U"
+TOKEN = "8527771101:AAFr_5QJhwhJsJgbwoVUjzxaveyIizFnkVc"
 
 players = []
 game_active = False
