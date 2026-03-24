@@ -11,6 +11,7 @@ registration_open = False
 current_player_index = 0
 waiting_end_turn = False
 turn_task = None
+coins = {}
 
 truths = [
     "Який твій найбільший страх?",
@@ -33,7 +34,15 @@ truths = [
     "Що(кого) боїшся втратити найбільше?",
     "Що останнє ти гуглив?",
     "Яка твоя улюблена гра?",
-    "Який твій улюблений колір?"  
+    "Який твій улюблений колір?",
+    "Хто тобі здається найсимпатичнішим в чаті?",
+    "Що б ти зробив, якби міг стати невидимкою на день?",
+    "Коли ти востаннє брехав і чому?",
+    "Що б ти в собі змінив, якби міг?",
+    "Що тебе найбільше бісить в людях?",
+    "Яка в тебе була найбільша сварка?",
+    "Кому ти довіряєш найбільше?",
+    "Якого питання ти боїшся найбільше?"
 ]
 
 dares = [
@@ -59,7 +68,9 @@ dares = [
     "Опиши себе словами на кожну букву імені",
     "Нехай інші придумають тобі роль і ти кажи від обличчя ролі 10 хвилин",
     "Три наступні хвилини пиши слова без букви А",
-    "Опиши себе трьома словами"  
+    "Опиши себе трьома словами",
+    "Напиши комусь 'В нас проблеми' і чекай реакцію",
+    "Напиши комусь 'Я все знаю' і чекай реакцію"
 ]
 
 # --- START GAME ---
@@ -122,7 +133,6 @@ async def registration_timer(context, chat_id, message_id):
 # --- JOIN ---
 async def join(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not registration_open:
-        await update.message.reply_text("❌ Зараз не можна приєднатись")
         return
 
     if len(players) >= 5:
@@ -133,22 +143,36 @@ async def join(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     if user.id not in players:
         players.append(user.id)
+
+        if user.id not in coins:
+            coins[user.id] = 20
+
         await update.message.reply_text(f"✅ {user.first_name} приєднався!")
 
 
-# --- LEAVE ---
+# --- LEAVE (FIXED) ---
 async def leave(update: Update, context: ContextTypes.DEFAULT_TYPE):
     global game_active
 
     user = update.message.from_user
 
-    if user.id in players:
-        players.remove(user.id)
-        await update.message.reply_text(f"❌ {user.first_name} вийшов")
+    if user.id not in players:
+        return
 
+    players.remove(user.id)
+
+    await update.message.reply_text(
+        f"❌ {user.first_name} вийшов\n👥 Гравців: {len(players)}"
+    )
+
+    # ❗ якщо гра ще не почалась — нічого не робимо
+    if not game_active:
+        return
+
+    # якщо під час гри стало мало гравців
     if len(players) < 2:
         game_active = False
-        await update.message.reply_text("⛔ Гру зупинено")
+        await update.message.reply_text("⛔ Гру зупинено (мало гравців)")
 
 
 # --- NEXT TURN ---
@@ -176,7 +200,6 @@ async def next_turn(context, chat_id):
         reply_markup=reply_markup
     )
 
-    # таймер ходу
     if turn_task:
         turn_task.cancel()
 
@@ -217,22 +240,19 @@ async def choice(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user = update.message.from_user
     text = update.message.text.lower()
 
-    # ❗ якщо не його хід — прибираємо кнопки
     if user.id != players[current_player_index]:
-        await update.message.reply_text(
-            "⛔ Зараз не твій хід",
-            reply_markup=ReplyKeyboardRemove()
-        )
         return
 
     if not waiting_end_turn:
         if text == "правда":
+            coins[user.id] += 5
             await update.message.reply_text(
                 random.choice(truths),
                 reply_markup=ReplyKeyboardRemove()
             )
 
         elif text == "дія":
+            coins[user.id] += 7
             await update.message.reply_text(
                 random.choice(dares),
                 reply_markup=ReplyKeyboardRemove()
@@ -266,12 +286,50 @@ async def choice(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await next_turn(context, update.effective_chat.id)
 
 
+# --- MONEY ---
+async def money(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    user = update.message.from_user
+
+    if user.id not in coins:
+        coins[user.id] = 0
+
+    await update.message.reply_text(
+        f"💎 У тебе {coins[user.id]} кристалів"
+    )
+
+
+# --- SKIP ---
+async def skip(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    global current_player_index
+
+    user = update.message.from_user
+
+    if not game_active:
+        return
+
+    if user.id != players[current_player_index]:
+        return
+
+    if coins.get(user.id, 0) < 10:
+        await update.message.reply_text("❌ Недостатньо кристалів (10)")
+        return
+
+    coins[user.id] -= 10
+    current_player_index += 1
+
+    await update.message.reply_text("⏭ Хід пропущено за 10 💎")
+
+    await next_turn(context, update.effective_chat.id)
+
+
 # --- RUN ---
 app = ApplicationBuilder().token(TOKEN).build()
 
 app.add_handler(CommandHandler("startgame", startgame))
 app.add_handler(CommandHandler("join", join))
 app.add_handler(CommandHandler("leave", leave))
+app.add_handler(CommandHandler("money", money))
+app.add_handler(CommandHandler("skip", skip))
 app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, choice))
 
 app.run_polling()
