@@ -12,66 +12,18 @@ current_player_index = 0
 waiting_end_turn = False
 turn_task = None
 coins = {}
+stats = {}
 
 truths = [
     "Який твій найбільший страх?",
     "Кого ти любиш найбільше (окрім родичів)?",
-    "Який твій найбільший секрет?",
-    "На що готовий заради коханої людини?",
-    "Чи уникав ти колись зустрічі з кимось?",
-    "Яка в тебе є дивна звичка?",
-    "Кого ти б поцілував в цьому чаті, якби прийшлося обирати?",
-    "Яку брехню ти казав що всі повірили?",
-    "Що ти приховуєш від батьків?",
-    "Про що ти шкодуєш найбільше?",
-    "Що ти колись побачив, що тобі запам'яталось на все життя?",
-    "Що про тебе думають інші, але це не правда?",
-    "Якби тобі треба було себе чесно описати - що б ти сказав?",
-    "Яку правду про себе тобі важко визнати?",
-    "Коли ти востаннє плакав і чому?",
-    "Що в собі ти не любиш?",
-    "Який в тебе талант?",
-    "Що(кого) боїшся втратити найбільше?",
-    "Що останнє ти гуглив?",
-    "Яка твоя улюблена гра?",
-    "Який твій улюблений колір?",
-    "Хто тобі здається найсимпатичнішим в чаті?",
-    "Що б ти зробив, якби міг стати невидимкою на день?",
-    "Коли ти востаннє брехав і чому?",
-    "Що б ти в собі змінив, якби міг?",
-    "Що тебе найбільше бісить в людях?",
-    "Яка в тебе була найбільша сварка?",
-    "Кому ти довіряєш найбільше?",
-    "Якого питання ти боїшся найбільше?",
-    "Якби можна було помінятися тілами на день, з ким би ти помінявся?"
+    "Який твій найбільший секрет?"
 ]
 
 dares = [
     "Зміни нік на 10 хвилин",
-    "Зміни аватарку на 10 хвилин",
-    "Скинь 13 фото з галереї",
-    "Заспівай якусь пісню в голосове повідомлення",
-    "Напиши четвертому по списку в чатах 'Я тебе люблю'",
-    "Напиши перше що прийде в голову",
-    "Пиши повідомлення тільки за допомогою емодзі 5 хвилин",
-    "Пиши повідомлення тільки англійськими буквами 5 хвилин",
-    "Покажи свою історію пошуку",
-    "Скинь скрін останніх 3 чатів",
-    "Відправ 13 фото з галереї",
-    "Напиши комплімент людині, яку оберуть інші",
-    "Дай іншим обрати слово а ти повинен пояснити його за допомогою прикметників",
-    "Запиши відео-рекламу будь якого предмета (10 секунд)",
-    "Нехай інші оберуть 10 емодзі а ти повинен придумати історію з ними",
-    "Коментуй наступні 15 повідомлень в чату як журналіст",
-    "Запиши голосове повідомлення де ти смієшся як кінь без причини (20 сек)",
-    "Напиши другу в особисті 'Дякую за все' і почекай реакції",
-    "Відповідай на питання питаннями 5 хвилин",
-    "Опиши себе словами на кожну букву імені",
-    "Нехай інші придумають тобі роль і ти кажи від обличчя ролі 10 хвилин",
-    "Три наступні хвилини пиши слова без букви А",
-    "Опиши себе трьома словами",
-    "Напиши комусь 'В нас проблеми' і чекай реакцію",
-    "Напиши комусь 'Я все знаю' і чекай реакцію"
+    "Заспівай пісню",
+    "Скинь фото"
 ]
 
 # --- START GAME ---
@@ -126,6 +78,13 @@ async def registration_timer(context, chat_id, message_id):
         return
 
     game_active = True
+
+    # 👉 додаємо ігри в статистику
+    for p in players:
+        if p not in stats:
+            stats[p] = {"games": 0, "truth": 0, "dare": 0}
+        stats[p]["games"] += 1
+
     await context.bot.send_message(chat_id, "🎮 Гра почалась!")
 
     await next_turn(context, chat_id)
@@ -151,7 +110,7 @@ async def join(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text(f"✅ {user.first_name} приєднався!")
 
 
-# --- LEAVE (FIXED) ---
+# --- LEAVE ---
 async def leave(update: Update, context: ContextTypes.DEFAULT_TYPE):
     global game_active
 
@@ -166,12 +125,7 @@ async def leave(update: Update, context: ContextTypes.DEFAULT_TYPE):
         f"❌ {user.first_name} вийшов\n👥 Гравців: {len(players)}"
     )
 
-    # ❗ якщо гра ще не почалась — нічого не робимо
-    if not game_active:
-        return
-
-    # якщо під час гри стало мало гравців
-    if len(players) < 2:
+    if game_active and len(players) < 2:
         game_active = False
         await update.message.reply_text("⛔ Гру зупинено (мало гравців)")
 
@@ -246,14 +200,24 @@ async def choice(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     if not waiting_end_turn:
         if text == "правда":
+            if user.id not in stats:
+                stats[user.id] = {"games": 0, "truth": 0, "dare": 0}
+
+            stats[user.id]["truth"] += 1
             coins[user.id] += 5
+
             await update.message.reply_text(
                 random.choice(truths),
                 reply_markup=ReplyKeyboardRemove()
             )
 
         elif text == "дія":
+            if user.id not in stats:
+                stats[user.id] = {"games": 0, "truth": 0, "dare": 0}
+
+            stats[user.id]["dare"] += 1
             coins[user.id] += 7
+
             await update.message.reply_text(
                 random.choice(dares),
                 reply_markup=ReplyKeyboardRemove()
@@ -299,6 +263,45 @@ async def money(update: Update, context: ContextTypes.DEFAULT_TYPE):
     )
 
 
+# --- STATS ---
+async def stats_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    user = update.message.from_user
+
+    if user.id not in stats:
+        stats[user.id] = {"games": 0, "truth": 0, "dare": 0}
+
+    s = stats[user.id]
+
+    await update.message.reply_text(
+        f"📊 {user.first_name}\n\n"
+        f"🎮 Ігор: {s['games']}\n"
+        f"😇 Правда: {s['truth']}\n"
+        f"😈 Дія: {s['dare']}"
+    )
+
+
+# --- TOP ---
+async def top(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not stats:
+        await update.message.reply_text("❌ Немає статистики")
+        return
+
+    text = "🏆 Топ гравців:\n\n"
+
+    sorted_users = sorted(stats.items(), key=lambda x: x[1]["games"], reverse=True)
+
+    for i, (user_id, s) in enumerate(sorted_users[:5], start=1):
+        try:
+            user = await context.bot.get_chat(user_id)
+            name = user.first_name
+        except:
+            name = "Гравець"
+
+        text += f"{i}. {name} — {s['games']} ігор\n"
+
+    await update.message.reply_text(text)
+
+
 # --- SKIP ---
 async def skip(update: Update, context: ContextTypes.DEFAULT_TYPE):
     global current_player_index
@@ -331,6 +334,8 @@ app.add_handler(CommandHandler("join", join))
 app.add_handler(CommandHandler("leave", leave))
 app.add_handler(CommandHandler("money", money))
 app.add_handler(CommandHandler("skip", skip))
+app.add_handler(CommandHandler("stats", stats_cmd))
+app.add_handler(CommandHandler("top", top))
 app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, choice))
 
 app.run_polling()
