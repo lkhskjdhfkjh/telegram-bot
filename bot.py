@@ -6,11 +6,10 @@ from telegram.ext import (
     filters, ContextTypes, ConversationHandler, CallbackQueryHandler
 )
 
-TOKEN = "8536774306:AAFf-SNStloCvTiHa15ksYyTdRlQhae0NFg"
+TOKEN = os.getenv("8527771101:AAFr_5QJhwhJsJgbwoVUjzxaveyIizFnkVc")  # або встав свій токен
 
 OWNER_ID = 7801504329
 COOWNER_ID = 6362536798
-ADMIN_ID = 7295595580
 
 # ===== БАЗА =====
 conn = sqlite3.connect("db.sqlite3", check_same_thread=False)
@@ -36,23 +35,35 @@ AGE, NAME, REASON, SKILLS, ORDER = range(5)
 
 # ===== /start =====
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    user_id = update.effective_user.id
+    user = update.effective_user
 
-    if user_id in [OWNER_ID, COOWNER_ID]:
+    cursor.execute("SELECT * FROM users WHERE user_id=?", (user.id,))
+    db_user = cursor.fetchone()
+
+    # якщо нема профілю — створити
+    if not db_user:
+        if user.id in [OWNER_ID, COOWNER_ID]:
+            rank = "Власник" if user.id == OWNER_ID else "Співвласник"
+            cursor.execute("""
+            INSERT INTO users (user_id, username, name, rank, approved)
+            VALUES (?, ?, ?, ?, 1)
+            """, (user.id, user.username, "Адмін", rank))
+            conn.commit()
+        else:
+            keyboard = [["Стати рейдером", "Замовити рейд"]]
+            await update.message.reply_text(
+                "VOID.EXE",
+                reply_markup=ReplyKeyboardMarkup(keyboard, resize_keyboard=True)
+            )
+            return
+
+    # якщо адмін
+    if user.id in [OWNER_ID, COOWNER_ID]:
         await update.message.reply_text("Адмін режим")
+        await profile(update, context)
         return
 
-    cursor.execute("SELECT * FROM users WHERE user_id=?", (user_id,))
-    user = cursor.fetchone()
-
-    if user:
-        await profile(update, context)
-    else:
-        keyboard = [["Стати рейдером", "Замовити рейд"]]
-        await update.message.reply_text(
-            "VOID.EXE",
-            reply_markup=ReplyKeyboardMarkup(keyboard, resize_keyboard=True)
-        )
+    await profile(update, context)
 
 # ===== ВИБІР =====
 async def choose(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -125,6 +136,10 @@ async def order(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user = update.effective_user
     link = update.message.text
 
+    if not link.startswith("http"):
+        await update.message.reply_text("❌ Скинь нормальне посилання")
+        return ORDER
+
     text = f"""НОВЕ ЗАМОВЛЕННЯ
 
 @{user.username}
@@ -137,7 +152,7 @@ ID: {user.id}
     await context.bot.send_message(OWNER_ID, text)
     await context.bot.send_message(COOWNER_ID, text)
 
-    await update.message.reply_text("Замовлення відправлено")
+    await update.message.reply_text("✅ Замовлення відправлено")
 
     return ConversationHandler.END
 
