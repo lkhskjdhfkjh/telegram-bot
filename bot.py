@@ -6,10 +6,12 @@ from telegram.ext import (
     filters, ContextTypes, ConversationHandler, CallbackQueryHandler
 )
 
-TOKEN = os.getenv("8527771101:AAFr_5QJhwhJsJgbwoVUjzxaveyIizFnkVc")  # або встав свій токен
+TOKEN = "8536774306:AAFf-SNStloCvTiHa15ksYyTdRlQhae0NFg"
 
 OWNER_ID = 7801504329
 COOWNER_ID = 6362536798
+
+ADMINS = [OWNER_ID, COOWNER_ID]
 
 # ===== БАЗА =====
 conn = sqlite3.connect("db.sqlite3", check_same_thread=False)
@@ -40,9 +42,9 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     cursor.execute("SELECT * FROM users WHERE user_id=?", (user.id,))
     db_user = cursor.fetchone()
 
-    # якщо нема профілю — створити
+    # створюємо профіль якщо нема
     if not db_user:
-        if user.id in [OWNER_ID, COOWNER_ID]:
+        if user.id in ADMINS:
             rank = "Власник" if user.id == OWNER_ID else "Співвласник"
             cursor.execute("""
             INSERT INTO users (user_id, username, name, rank, approved)
@@ -57,8 +59,8 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
             )
             return
 
-    # якщо адмін
-    if user.id in [OWNER_ID, COOWNER_ID]:
+    # адмін
+    if user.id in ADMINS:
         await update.message.reply_text("Адмін режим")
         await profile(update, context)
         return
@@ -126,7 +128,9 @@ ID: {user.id}
         [InlineKeyboardButton("❌ Відхилити", callback_data=f"reject_{user.id}")]
     ])
 
-    await context.bot.send_message(ADMIN_ID, text, reply_markup=keyboard)
+    for admin in ADMINS:
+        await context.bot.send_message(admin, text, reply_markup=keyboard)
+
     await update.message.reply_text("Анкета відправлена")
 
     return ConversationHandler.END
@@ -149,8 +153,8 @@ ID: {user.id}
 {link}
 """
 
-    await context.bot.send_message(OWNER_ID, text)
-    await context.bot.send_message(COOWNER_ID, text)
+    for admin in ADMINS:
+        await context.bot.send_message(admin, text)
 
     await update.message.reply_text("✅ Замовлення відправлено")
 
@@ -164,7 +168,7 @@ async def buttons(update: Update, context: ContextTypes.DEFAULT_TYPE):
     data = query.data
     user_id = int(data.split("_")[1])
 
-    if query.from_user.id not in [OWNER_ID, COOWNER_ID]:
+    if query.from_user.id not in ADMINS:
         return
 
     if "approve" in data:
