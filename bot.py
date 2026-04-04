@@ -6,7 +6,7 @@ from telegram.ext import (
 )
 
 # 🔑 ВСТАВ СВІЙ ТОКЕН
-TOKEN = "ТУТ_ТВІЙ_ТОКЕН"
+TOKEN = "8536774306:AAFf-SNStloCvTiHa15ksYyTdRlQhae0NFg"
 
 # 👑 АДМІНИ
 OWNER_ID = 7801504329
