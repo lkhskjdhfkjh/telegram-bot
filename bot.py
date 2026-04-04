@@ -6,7 +6,7 @@ from telegram.ext import (
     filters, ContextTypes, ConversationHandler, CallbackQueryHandler
 )
 
-TOKEN = os.getenv("8536774306:AAFf-SNStloCvTiHa15ksYyTdRlQhae0NFg")
+TOKEN = "8536774306:AAFf-SNStloCvTiHa15ksYyTdRlQhae0NFg"
 
 OWNER_ID = 7801504329
 COOWNER_ID = 6362536798
