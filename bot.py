@@ -1,379 +1,207 @@
-from telegram import Update, ReplyKeyboardMarkup, ReplyKeyboardRemove
-from telegram.ext import ApplicationBuilder, CommandHandler, MessageHandler, filters, ContextTypes
-import random
-import asyncio
-import json
 import os
+import sqlite3
+from telegram import Update, ReplyKeyboardMarkup, InlineKeyboardMarkup, InlineKeyboardButton
+from telegram.ext import (
+    ApplicationBuilder, CommandHandler, MessageHandler,
+    filters, ContextTypes, ConversationHandler, CallbackQueryHandler
+)
 
-TOKEN = "8527771101:AAFr_5QJhwhJsJgbwoVUjzxaveyIizFnkVc"
+TOKEN = os.getenv("8536774306:AAFf-SNStloCvTiHa15ksYyTdRlQhae0NFg")
 
-# --- ГРА ---
-players = []
-game_active = False
-registration_open = False
-current_player_index = 0
-waiting_end_turn = False
-turn_task = None
+OWNER_ID = 7801504329
+COOWNER_ID = 6362536798
+ADMIN_ID = 7295595580
 
-# --- МЕХАНІКИ ---
-skip_used = 0
-last_task = None
+# ===== БАЗА =====
+conn = sqlite3.connect("db.sqlite3", check_same_thread=False)
+cursor = conn.cursor()
 
-# --- СТАТИСТИКА ---
-stats = {}
-chat_stats = {}
+cursor.execute("""
+CREATE TABLE IF NOT EXISTS users (
+    user_id INTEGER PRIMARY KEY,
+    username TEXT,
+    name TEXT,
+    age TEXT,
+    reason TEXT,
+    skills TEXT,
+    rank TEXT DEFAULT 'Новачок',
+    raids INTEGER DEFAULT 0,
+    approved INTEGER DEFAULT 0
+)
+""")
+conn.commit()
 
-# --- ФАЙЛ ЗБЕРЕЖЕННЯ ---
-DATA_FILE = "data.json"
+# ===== СТАНИ =====
+AGE, NAME, REASON, SKILLS, ORDER = range(5)
 
+# ===== /start =====
+async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    user_id = update.effective_user.id
 
-# --- ЗАВАНТАЖЕННЯ ---
-def load_data():
-    global stats, chat_stats
-
-    if os.path.exists(DATA_FILE):
-        with open(DATA_FILE, "r") as f:
-            data = json.load(f)
-            stats = data.get("stats", {})
-            chat_stats = data.get("chat_stats", {})
-
-
-# --- ЗБЕРЕЖЕННЯ ---
-def save_data():
-    with open(DATA_FILE, "w") as f:
-        json.dump({
-            "stats": stats,
-            "chat_stats": chat_stats
-        }, f)
-
-
-# --- ПРАВДА / ДІЯ ---
-truths = [
-    "Який твій найбільший страх?",
-    "Кого ти любиш найбільше (окрім родичів)?",
-    "Який твій найбільший секрет?",
-    "На що готовий заради коханої людини?",
-    "Чи уникав ти колись зустрічі з кимось?",
-    "Яка в тебе є дивна звичка?",
-    "Кого ти б поцілував в цьому чаті, якби прийшлося обирати?",
-    "Яку брехню ти казав що всі повірили?",
-    "Що ти приховуєш від батьків?",
-    "Про що ти шкодуєш найбільше?",
-    "Що ти колись побачив, що тобі запам'яталось на все життя?",
-    "Що про тебе думають інші, але це не правда?",
-    "Якби тобі треба було себе чесно описати - що б ти сказав?",
-    "Яку правду про себе тобі важко визнати?",
-    "Коли ти востаннє плакав і чому?",
-    "Що в собі ти не любиш?",
-    "Який в тебе талант?",
-    "Що (кого) боїшся втратити найбільше?",
-    "Що останнє ти гуглив?",
-    "Яка твоя улюблена гра?",
-    "Який твій улюблений колір?",
-    "Хто тобі здається найсимпатичнішим в чаті?",
-    "Що б ти зробив, якби міг стати невидимкою на день?",
-    "Коли ти востаннє брехав і чому?",
-    "Що б ти в собі змінив, якби міг?",
-    "Що тебе найбільше бісить в людях?",
-    "Яка в тебе була найбільша сварка?",
-    "Кому ти довіряєш найбільше?",
-    "Якого питання ти боїшся найбільше?",
-    "Якби можна було помінятися тілами на день, з ким би ти помінявся?"
-]
-
-dares = [
-    "Зміни нік на 10 хвилин",
-    "Зміни аватарку на 10 хвилин",
-    "Скинь 13 фото з галереї",
-    "Заспівай якусь пісню в голосове повідомлення",
-    "Напиши четвертому по списку в чатах 'Я тебе люблю'",
-    "Напиши перше що прийде в голову",
-    "Пиши повідомлення тільки за допомогою емодзі 5 хвилин",
-    "Пиши повідомлення тільки англійськими буквами 5 хвилин",
-    "Покажи свою історію пошуку",
-    "Скинь скрін останніх 3 чатів",
-    "Відправ 13 фото з галереї",
-    "Напиши комплімент людині, яку оберуть інші",
-    "Дай іншим обрати слово, а ти повинен пояснити його за допомогою прикметників",
-    "Запиши відео-рекламу будь-якого предмета (10 секунд)",
-    "Нехай інші оберуть 10 емодзі, а ти повинен придумати історію з ними",
-    "Коментуй наступні 15 повідомлень в чаті як журналіст",
-    "Запиши голосове повідомлення, де ти смієшся як кінь без причини (20 сек)",
-    "Напиши другу в особисті 'Дякую за все' і почекай реакції",
-    "Відповідай на питання питаннями 5 хвилин",
-    "Опиши себе словами на кожну букву імені",
-    "Нехай інші придумають тобі роль і ти кажи від обличчя ролі 10 хвилин",
-    "Три наступні хвилини пиши слова без букви А",
-    "Опиши себе трьома словами",
-    "Напиши комусь 'В нас проблеми' і чекай реакцію",
-    "Напиши комусь 'Я все знаю' і чекай реакцію"
-]
-
-async def startgame(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    global players, game_active, registration_open, current_player_index
-
-    if registration_open or game_active:
-        await update.message.reply_text("❌ Гра вже йде або реєстрація відкрита")
+    if user_id in [OWNER_ID, COOWNER_ID]:
+        await update.message.reply_text("Адмін режим")
         return
 
-    # 🔐 перевірка прав
-    bot_member = await context.bot.get_chat_member(update.effective_chat.id, context.bot.id)
+    cursor.execute("SELECT * FROM users WHERE user_id=?", (user_id,))
+    user = cursor.fetchone()
 
-    if not bot_member.can_pin_messages:
-        await update.message.reply_text("❌ Дай боту права на закріплення повідомлень")
-        return
-
-    players = []
-    game_active = False
-    registration_open = True
-    current_player_index = 0
-
-    msg = await update.message.reply_text(
-        "🔥 Реєстрація відкрита!\n\n"
-        "Пиши /join щоб приєднатись\n"
-        "⏳ Залишилося 60 секунд до початку гри"
-    )
-
-    await context.bot.pin_chat_message(update.effective_chat.id, msg.message_id)
-
-    context.application.create_task(
-        registration_timer(context, update.effective_chat.id, msg.message_id)
-    )
-    async def registration_timer(context, chat_id, message_id):
-    global registration_open, game_active
-
-    for i in range(6):
-        await asyncio.sleep(10)
-
-        if not registration_open:
-            return
-
-        try:
-            await context.bot.edit_message_text(
-                chat_id=chat_id,
-                message_id=message_id,
-                text=f"🔥 Реєстрація відкрита!\n\n"
-                     f"Пиши /join щоб приєднатись\n"
-                     f"⏳ Залишилося {60 - (i+1)*10} секунд до початку гри"
-            )
-        except:
-            pass
-
-    registration_open = False
-
-    if len(players) < 2:
-        await context.bot.send_message(chat_id, "❌ Недостатньо гравців")
-        return
-
-    game_active = True
-
-    # 📊 статистика
-    chat_stats[str(chat_id)] = chat_stats.get(str(chat_id), {"games": 0})
-    chat_stats[str(chat_id)]["games"] += 1
-
-    for p in players:
-        stats[str(p)] = stats.get(str(p), {"games": 0})
-        stats[str(p)]["games"] += 1
-
-    save_data()
-
-    await context.bot.send_message(chat_id, "🎮 Гра почалась!")
-
-    await next_turn(context, chat_id)
-    async def join(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if not registration_open:
-        return
-
-    if len(players) >= 5:
-        await update.message.reply_text("❌ Максимум 5 гравців")
-        return
-
-    user = update.message.from_user
-
-    if user.id not in players:
-        players.append(user.id)
-        await update.message.reply_text(f"✅ {user.first_name} приєднався!")
-        async def leave(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    global game_active
-
-    user = update.message.from_user
-
-    if user.id not in players:
-        return
-
-    players.remove(user.id)
-
-    await update.message.reply_text(
-        f"❌ {user.first_name} вийшов\n👥 Гравців: {len(players)}"
-    )
-
-    # ❗ якщо гра вже йде і мало гравців
-    if game_active and len(players) < 2:
-        game_active = False
-        await update.message.reply_text("⛔ Гру зупинено (мало гравців)")
-
-# --- CHOICE (FINAL NORMAL BUTTONS LIKE PHOTO 2) ---
-async def choice(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    global current_player_index, waiting_end_turn, turn_task
-
-    if not update.message or not game_active:
-        return
-
-    user = update.message.from_user
-    text = update.message.text.lower()
-
-    if user.id != players[current_player_index]:
-        return
-
-    # --- вибір правда/дія ---
-    if not waiting_end_turn:
-
-        # ❗ прибираємо кнопки одразу
+    if user:
+        await profile(update, context)
+    else:
+        keyboard = [["Стати рейдером", "Замовити рейд"]]
         await update.message.reply_text(
-            "🎲 Обробка...",
-            reply_markup=ReplyKeyboardRemove()
+            "VOID.EXE",
+            reply_markup=ReplyKeyboardMarkup(keyboard, resize_keyboard=True)
         )
 
-        if text == "правда":
-            msg = random.choice(truths)
-        elif text == "дія":
-            msg = random.choice(dares)
-        else:
-            return
+# ===== ВИБІР =====
+async def choose(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    text = update.message.text
 
-        # надсилаємо завдання БЕЗ кнопок
-        await context.bot.send_message(
-            chat_id=update.effective_chat.id,
-            text=f"📌 Завдання:\n{msg}"
-        )
+    if text == "Стати рейдером":
+        await update.message.reply_text("Вік:")
+        return AGE
 
-        # тепер тільки кнопка завершення (як окрема клавіатура внизу)
-        keyboard = [["✅ завершити хід"]]
-        reply_markup = ReplyKeyboardMarkup(
-            keyboard,
-            resize_keyboard=True,
-            one_time_keyboard=True
-        )
+    elif text == "Замовити рейд":
+        await update.message.reply_text("Скинь посилання:")
+        return ORDER
 
-        waiting_end_turn = True
+# ===== АНКЕТА =====
+async def age(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    context.user_data["age"] = update.message.text
+    await update.message.reply_text("Ім'я:")
+    return NAME
 
-        await context.bot.send_message(
-            chat_id=update.effective_chat.id,
-            text="👇 Натисни щоб передати хід",
-            reply_markup=reply_markup
-        )
+async def name(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    context.user_data["name"] = update.message.text
+    await update.message.reply_text("Чому хочеш стати рейдером?")
+    return REASON
 
-    # --- завершення ---
-    elif waiting_end_turn and "завершити" in text:
+async def reason(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    context.user_data["reason"] = update.message.text
+    await update.message.reply_text("Скіли:")
+    return SKILLS
 
-        if turn_task:
-            turn_task.cancel()
+async def skills(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    user = update.effective_user
+    context.user_data["skills"] = update.message.text
 
-        current_player_index += 1
-        waiting_end_turn = False
+    cursor.execute("""
+    INSERT OR REPLACE INTO users (user_id, username, name, age, reason, skills)
+    VALUES (?, ?, ?, ?, ?, ?)
+    """, (
+        user.id,
+        user.username,
+        context.user_data["name"],
+        context.user_data["age"],
+        context.user_data["reason"],
+        context.user_data["skills"]
+    ))
+    conn.commit()
 
-        # ❗ повністю прибираємо клавіатуру
-        await update.message.reply_text(
-            "➡ Хід передано",
-            reply_markup=ReplyKeyboardRemove()
-        )
+    text = f"""АНКЕТА
 
-        await next_turn(context, update.effective_chat.id)
-        # --- STATS (особиста статистика) ---
-async def stats(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    user = update.message.from_user
+@{user.username}
+ID: {user.id}
 
-    games = user_stats.get(user.id, {}).get("games", 0)
-    truths_count = user_stats.get(user.id, {}).get("truths", 0)
-    dares_count = user_stats.get(user.id, {}).get("dares", 0)
+Ім'я: {context.user_data["name"]}
+Вік: {context.user_data["age"]}
+Причина: {context.user_data["reason"]}
+Скіли: {context.user_data["skills"]}
+"""
 
-    await update.message.reply_text(
-        f"📊 Статистика {user.first_name}:\n\n"
-        f"🎮 Ігор: {games}\n"
-        f"❓ Правда: {truths_count}\n"
-        f"🔥 Дія: {dares_count}"
-    )
+    keyboard = InlineKeyboardMarkup([
+        [InlineKeyboardButton("✅ Прийняти", callback_data=f"approve_{user.id}")],
+        [InlineKeyboardButton("❌ Відхилити", callback_data=f"reject_{user.id}")]
+    ])
 
+    await context.bot.send_message(ADMIN_ID, text, reply_markup=keyboard)
+    await update.message.reply_text("Анкета відправлена")
 
-# --- TOP CHAT ---
-async def top(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if not user_stats:
-        await update.message.reply_text("❌ Немає даних")
+    return ConversationHandler.END
+
+# ===== ЗАМОВЛЕННЯ =====
+async def order(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    user = update.effective_user
+    link = update.message.text
+
+    text = f"""НОВЕ ЗАМОВЛЕННЯ
+
+@{user.username}
+ID: {user.id}
+
+Посилання:
+{link}
+"""
+
+    await context.bot.send_message(OWNER_ID, text)
+    await context.bot.send_message(COOWNER_ID, text)
+
+    await update.message.reply_text("Замовлення відправлено")
+
+    return ConversationHandler.END
+
+# ===== КНОПКИ =====
+async def buttons(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
+    await query.answer()
+
+    data = query.data
+    user_id = int(data.split("_")[1])
+
+    if query.from_user.id not in [OWNER_ID, COOWNER_ID]:
         return
 
-    sorted_users = sorted(user_stats.items(), key=lambda x: x[1].get("games", 0), reverse=True)
+    if "approve" in data:
+        cursor.execute("UPDATE users SET approved=1 WHERE user_id=?", (user_id,))
+        conn.commit()
+        await context.bot.send_message(user_id, "Тебе прийнято")
+        await query.edit_message_text("Прийнято")
 
-    text = "🏆 Топ гравців чату:\n\n"
+    elif "reject" in data:
+        cursor.execute("DELETE FROM users WHERE user_id=?", (user_id,))
+        conn.commit()
+        await context.bot.send_message(user_id, "Тебе відхилено")
+        await query.edit_message_text("Відхилено")
 
-    for i, (user_id, data) in enumerate(sorted_users[:10], start=1):
-        try:
-            user = await context.bot.get_chat(user_id)
-            name = user.first_name
-        except:
-            name = "Unknown"
+# ===== ПРОФІЛЬ =====
+async def profile(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    user_id = update.effective_user.id
 
-        text += f"{i}. {name} — {data.get('games',0)} ігор\n"
+    cursor.execute("SELECT * FROM users WHERE user_id=?", (user_id,))
+    user = cursor.fetchone()
+
+    if not user:
+        await update.message.reply_text("Нема профілю")
+        return
+
+    text = f"""ПРОФІЛЬ
+
+Ім'я: {user[2]}
+Ранг: {user[6]}
+Рейди: {user[7]}
+"""
 
     await update.message.reply_text(text)
 
-
-# --- GLOBAL TOP ---
-async def topall(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if not global_stats:
-        await update.message.reply_text("❌ Немає глобальних даних")
-        return
-
-    sorted_users = sorted(global_stats.items(), key=lambda x: x[1], reverse=True)
-
-    text = "🌍 Глобальний топ гравців:\n\n"
-
-    for i, (user_id, games) in enumerate(sorted_users[:10], start=1):
-        try:
-            user = await context.bot.get_chat(user_id)
-            name = user.first_name
-        except:
-            name = "Unknown"
-
-        text += f"{i}. {name} — {games} ігор\n"
-
-    await update.message.reply_text(text)
-
-
-# --- HELP ---
-async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await update.message.reply_text(
-        "📖 Truth or Dare Bot\n\n"
-        "🎮 Команди:\n"
-        "/startgame — почати гру\n"
-        "/join — приєднатись\n"
-        "/leave — вийти\n"
-        "/stats — твоя статистика\n"
-        "/top — топ чату\n"
-        "/topall — глобальний топ\n"
-        "/help — допомога\n\n"
-        "⚙️ Механіка:\n"
-        "• До 5 гравців\n"
-        "• 60 сек реєстрація\n"
-        "• 3 хв на хід\n"
-        "• 2 безкоштовні зміни завдання\n\n"
-        "👑 Власник: (твій юз)\n"
-        "📢 ТГК: (твій канал)\n\n"
-        "💬 Ідеї / баги — пиши власнику"
-    )
-
-
-# --- RUN ---
+# ===== ЗАПУСК =====
 app = ApplicationBuilder().token(TOKEN).build()
 
-app.add_handler(CommandHandler("startgame", startgame))
-app.add_handler(CommandHandler("join", join))
-app.add_handler(CommandHandler("leave", leave))
-app.add_handler(CommandHandler("stats", stats))
-app.add_handler(CommandHandler("top", top))
-app.add_handler(CommandHandler("topall", topall))
-app.add_handler(CommandHandler("help", help_command))
+conv = ConversationHandler(
+    entry_points=[MessageHandler(filters.TEXT & ~filters.COMMAND, choose)],
+    states={
+        AGE: [MessageHandler(filters.TEXT, age)],
+        NAME: [MessageHandler(filters.TEXT, name)],
+        REASON: [MessageHandler(filters.TEXT, reason)],
+        SKILLS: [MessageHandler(filters.TEXT, skills)],
+        ORDER: [MessageHandler(filters.TEXT, order)],
+    },
+    fallbacks=[]
+)
 
-app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, choice))
+app.add_handler(CommandHandler("start", start))
+app.add_handler(CommandHandler("profile", profile))
+app.add_handler(conv)
+app.add_handler(CallbackQueryHandler(buttons))
 
-print("Бот запущений 🚀")
 app.run_polling()
