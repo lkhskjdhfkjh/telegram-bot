@@ -1,153 +1,83 @@
 import sqlite3
-from telegram import Update, ReplyKeyboardMarkup, InlineKeyboardMarkup, InlineKeyboardButton
+from telegram import Update, InlineKeyboardMarkup, InlineKeyboardButton
 from telegram.ext import (
     ApplicationBuilder, CommandHandler, MessageHandler,
     filters, ContextTypes, ConversationHandler, CallbackQueryHandler
 )
 
-# 🔑 ВСТАВ СВІЙ ТОКЕН
 TOKEN = "8536774306:AAFf-SNStloCvTiHa15ksYyTdRlQhae0NFg"
 
-# 👑 АДМІНИ
 OWNER_ID = 7801504329
 COOWNER_ID = 6362536798
 ADMINS = [OWNER_ID, COOWNER_ID]
 
-# 💾 БАЗА ДАНИХ
-conn = sqlite3.connect("db.sqlite3", check_same_thread=False)
+# ===== БАЗА =====
+conn = sqlite3.connect("users.db", check_same_thread=False)
 cursor = conn.cursor()
 
 cursor.execute("""
 CREATE TABLE IF NOT EXISTS users (
-    user_id INTEGER PRIMARY KEY,
-    username TEXT,
-    name TEXT,
-    age TEXT,
-    reason TEXT,
-    skills TEXT,
-    rank TEXT DEFAULT 'Новачок',
-    raids INTEGER DEFAULT 0,
-    approved INTEGER DEFAULT 0
+    user_id INTEGER PRIMARY KEY
 )
 """)
 conn.commit()
 
-# 🔄 СТАНИ ДІАЛОГУ
-AGE, NAME, REASON, SKILLS, ORDER = range(5)
+AGE, NAME, REASON, SKILLS, ORDER, DELETE = range(6)
 
+# ===== СТАРТ =====
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    user = update.effective_user
-
-    # перевірка чи є в базі
-    cursor.execute("SELECT * FROM users WHERE user_id=?", (user.id,))
-    db_user = cursor.fetchone()
-
-    # якщо нема профілю
-    if not db_user:
-        if user.id in ADMINS:
-            rank = "Власник" if user.id == OWNER_ID else "Співвласник"
-
-            cursor.execute("""
-            INSERT INTO users (user_id, username, name, rank, approved)
-            VALUES (?, ?, ?, ?, 1)
-            """, (user.id, user.username, "Адмін", rank))
-            conn.commit()
-        else:
-            keyboard = [["⚔️ Стати рейдером", "💣 Замовити рейд"]]
-
-            await update.message.reply_text(
-                "👋 Привіт.\n\n"
-                "Ти потрапив у систему VOID.\n"
-                "Тут ти можеш:\n"
-                "• приєднатися до рейдерів\n"
-                "• або замовити рейд\n\n"
-                "Обери потрібну дію нижче:",
-                reply_markup=ReplyKeyboardMarkup(keyboard, resize_keyboard=True)
-            )
-            return
-
-    # якщо адмін
-    if user.id in ADMINS:
-        await update.message.reply_text("🔧 Адмін режим активовано.")
-        await profile(update, context)
-        return
-
-    # звичайний користувач
-    await profile(update, context)
-    async def choose(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    text = update.message.text
-
-    if text == "⚔️ Стати рейдером":
-        await update.message.reply_text(
-            "📋 Починаємо анкету.\n\n"
-            "Вкажи свій вік:"
-        )
-        return AGE
-
-    elif text == "💣 Замовити рейд":
-        await update.message.reply_text(
-            "🔗 Надішли посилання на ціль.\n\n"
-            "Я передам його адміністрації після перевірки."
-        )
-        return ORDER
-        async def age(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    context.user_data["age"] = update.message.text
+    keyboard = InlineKeyboardMarkup([
+        [InlineKeyboardButton("⚔️ Реєстрація", callback_data="reg")],
+        [InlineKeyboardButton("💣 Замовити рейд", callback_data="order")]
+    ])
 
     await update.message.reply_text(
-        "✏️ Добре.\n\n"
-        "Тепер напиши своє ім'я або псевдонім:"
+        "👋 Привіт.\n\nОбери дію:",
+        reply_markup=keyboard
     )
-    return NAME
 
+# ===== МЕНЮ =====
+async def menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
+    await query.answer()
+
+    user_id = query.from_user.id
+
+    # перевірка реєстрації
+    cursor.execute("SELECT * FROM users WHERE user_id=?", (user_id,))
+    if cursor.fetchone() and query.data == "reg":
+        await query.message.reply_text("⚠️ Ти вже зареєстрований")
+        return ConversationHandler.END
+
+    if query.data == "reg":
+        await query.message.reply_text("📋 Вкажи свій вік:")
+        return AGE
+
+    elif query.data == "order":
+        await query.message.reply_text("🔗 Надішли посилання:")
+        return ORDER
+
+# ===== АНКЕТА =====
+async def age(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    context.user_data["age"] = update.message.text
+    await update.message.reply_text("Ім'я або нік:")
+    return NAME
 
 async def name(update: Update, context: ContextTypes.DEFAULT_TYPE):
     context.user_data["name"] = update.message.text
-
-    await update.message.reply_text(
-        "❓ Чому ти вирішив(ла) стати рейдером?\n\n"
-        "Опиши коротко свою мотивацію:"
-    )
+    await update.message.reply_text("Чому хочеш вступити?")
     return REASON
-
 
 async def reason(update: Update, context: ContextTypes.DEFAULT_TYPE):
     context.user_data["reason"] = update.message.text
-
-    await update.message.reply_text(
-        "🧠 Останнє питання.\n\n"
-        "Які в тебе навички?\n"
-        "(досвід, що вмієш, що робив раніше)"
-    )
+    await update.message.reply_text("Твої навички:")
     return SKILLS
-    async def skills(update: Update, context: ContextTypes.DEFAULT_TYPE):
+
+async def skills(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user = update.effective_user
     context.user_data["skills"] = update.message.text
 
-    # зберігаємо в базу
-    cursor.execute("""
-    # перевірка чи вже є анкета
-cursor.execute("SELECT approved FROM users WHERE user_id=?", (user.id,))
-existing = cursor.fetchone()
-
-if existing and existing[0] == 0:
-    await update.message.reply_text(
-        "⏳ Ти вже відправляв анкету.\n"
-        "Очікуй рішення адміністрації."
-    )
-    return ConversationHandler.END (user_id, username, name, age, reason, skills)
-    VALUES (?, ?, ?, ?, ?, ?)
-    """, (
-        user.id,
-        user.username,
-        context.user_data["name"],
-        context.user_data["age"],
-        context.user_data["reason"],
-        context.user_data["skills"]
-    ))
-    conn.commit()
-
-    # текст анкети
-    text = f"""📥 НОВА АНКЕТА
+    text = f"""📥 АНКЕТА
 
 👤 @{user.username}
 🆔 {user.id}
@@ -158,37 +88,25 @@ if existing and existing[0] == 0:
 Скіли: {context.user_data["skills"]}
 """
 
-    # кнопки
-    keyboard = InlineKeyboardMarkup([
-        [InlineKeyboardButton("✅ Прийняти", callback_data=f"approve_{user.id}")],
-        [InlineKeyboardButton("❌ Відхилити", callback_data=f"reject_{user.id}")]
-    ])
+    await context.bot.send_message(OWNER_ID, text)
 
-    # відправка адмінам
-    for admin in ADMINS:
-        await context.bot.send_message(admin, text, reply_markup=keyboard)
+    # зберігаємо юзера
+    cursor.execute("INSERT INTO users (user_id) VALUES (?)", (user.id,))
+    conn.commit()
 
-    # відповідь користувачу
-    await update.message.reply_text(
-        "✅ Я відправив твою анкету адміністрації.\n\n"
-        "⏳ Очікуй рішення. З тобою зв'яжуться після перевірки."
-    )
+    await update.message.reply_text("✅ Я відправив анкету")
 
     return ConversationHandler.END
 
+# ===== ЗАМОВЛЕННЯ =====
 async def order(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user = update.effective_user
-    link = update.message.text.strip()
+    link = update.message.text
 
-    # перевірка посилання
-    if not (link.startswith("http://") or link.startswith("https://")):
-        await update.message.reply_text(
-            "❌ Це не схоже на посилання.\n\n"
-            "Надішли коректний лінк (наприклад: https://t.me/...)."
-        )
+    if not link.startswith("http"):
+        await update.message.reply_text("❌ Це не посилання")
         return ORDER
 
-    # текст для адмінів
     text = f"""💣 НОВЕ ЗАМОВЛЕННЯ
 
 👤 @{user.username}
@@ -197,77 +115,91 @@ async def order(update: Update, context: ContextTypes.DEFAULT_TYPE):
 🔗 {link}
 """
 
-    # відправка адмінам
-    for admin in ADMINS:
-        await context.bot.send_message(admin, text)
+    await context.bot.send_message(OWNER_ID, text)
 
-    # відповідь користувачу
-    await update.message.reply_text(
-        "✅ Я відправив твоє замовлення адміністрації.\n\n"
-        "⏳ Очікуй відповідь. Якщо замовлення приймуть — з тобою зв'яжуться."
-    )
+    await update.message.reply_text("✅ Я відправив замовлення")
 
     return ConversationHandler.END
-    async def buttons(update: Update, context: ContextTypes.DEFAULT_TYPE):
+
+# ===== ПАНЕЛЬ =====
+async def panel(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if update.effective_user.id not in ADMINS:
+        await update.message.reply_text("❌ Нема доступу")
+        return
+
+    keyboard = InlineKeyboardMarkup([
+        [InlineKeyboardButton("📊 Список", callback_data="list")],
+        [InlineKeyboardButton("🗑 Видалити", callback_data="delete")]
+    ])
+
+    await update.message.reply_text("🔧 Панель:", reply_markup=keyboard)
+
+# ===== КНОПКИ ПАНЕЛІ =====
+async def panel_buttons(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await query.answer()
 
-    data = query.data
-    user_id = int(data.split("_")[1])
-
-    # тільки адміни можуть натискати
     if query.from_user.id not in ADMINS:
         return
 
-    # прийняти
-    if "approve" in data:
-        cursor.execute("UPDATE users SET approved=1 WHERE user_id=?", (user_id,))
+    if query.data == "list":
+        cursor.execute("SELECT user_id FROM users")
+        users = cursor.fetchall()
+
+        text = "📊 СПИСОК:\n\n"
+
+        for u in users:
+            try:
+                chat = await context.bot.get_chat(u[0])
+                name = chat.first_name
+                username = f"@{chat.username}" if chat.username else "без юзера"
+
+                text += f"👤 {name}\n{username}\n🆔 {u[0]}\n\n"
+            except:
+                text += f"🆔 {u[0]}\n\n"
+
+        await query.message.reply_text(text)
+
+    elif query.data == "delete":
+        await query.message.reply_text("✏️ Введи ID:")
+        return DELETE
+
+# ===== ВИДАЛЕННЯ =====
+async def delete_user(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if update.effective_user.id not in ADMINS:
+        return ConversationHandler.END
+
+    try:
+        uid = int(update.message.text)
+        cursor.execute("DELETE FROM users WHERE user_id=?", (uid,))
         conn.commit()
+        await update.message.reply_text("✅ Видалено")
+    except:
+        await update.message.reply_text("❌ Помилка")
 
-        await context.bot.send_message(
-            user_id,
-            "🎉 Вітаю.\n\n"
-            "Тебе прийнято в систему VOID.\n"
-            "Найближчим часом тобі можуть видати наставника."
-        )
+    return ConversationHandler.END
 
-        await query.edit_message_text("✅ Користувача прийнято")
+# ===== ЗАПУСК =====
+app = ApplicationBuilder().token(TOKEN).build()
 
-    # відхилити
-    elif "reject" in data:
-        cursor.execute("DELETE FROM users WHERE user_id=?", (user_id,))
-        conn.commit()
+conv = ConversationHandler(
+    entry_points=[CallbackQueryHandler(menu)],
+    states={
+        AGE: [MessageHandler(filters.TEXT, age)],
+        NAME: [MessageHandler(filters.TEXT, name)],
+        REASON: [MessageHandler(filters.TEXT, reason)],
+        SKILLS: [MessageHandler(filters.TEXT, skills)],
+        ORDER: [MessageHandler(filters.TEXT, order)],
+        DELETE: [MessageHandler(filters.TEXT, delete_user)],
+    },
+    fallbacks=[]
+)
 
-        await context.bot.send_message(
-            user_id,
-            "❌ На жаль, твою анкету відхилено.\n\n"
-            "Можеш спробувати ще раз пізніше."
-        )
+app.add_handler(CommandHandler("start", start))
+app.add_handler(CommandHandler("panel", panel))
+app.add_handler(conv)
+app.add_handler(CallbackQueryHandler(panel_buttons))
 
-        await query.edit_message_text("❌ Користувача відхилено")
+print("Бот працює 🚀")
 
-async def profile(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    user_id = update.effective_user.id
-
-    cursor.execute("SELECT * FROM users WHERE user_id=?", (user_id,))
-    user = cursor.fetchone()
-
-    if not user:
-        await update.message.reply_text(
-            "❌ Профіль не знайдено.\n\n"
-            "Спробуй написати /start"
-        )
-        return
-
-    status = "✅ Прийнятий" if user[8] == 1 else "⏳ На розгляді"
-
-    text = f"""👤 ПРОФІЛЬ
-
-Ім'я: {user[2]}
-Ранг: {user[6]}
-Рейди: {user[7]}
-
-Статус: {status}
-"""
-
-    await update.message.reply_text(text)
+app.run_polling()
